@@ -1,0 +1,36 @@
+# Kebun Reaktivasi RC-1 — Package Manifest
+
+Package root: `Kebun_Reaktivasi_RC-1_2026-08-04`
+
+## Included files
+
+| Path | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `app/kebun_reaktivasi(rev).py` | 140923 | `9a9ab73cafa0254c65f9fdfb086efbfa85259679c9db95cca8d68f9b29cfd2d7` |
+| `app/license_generator.py` | 5239 | `690f1f380d2c58b1fefdbcd36a270c65b649990bc87d497227533c96300036cd` |
+| `app/requirements.txt` | 41 | `2dd5e9e28478edf9b8764dcb7b4e1ab8a0101206b4175f25238f8808fd6f5b2b` |
+| `app/logs/.gitkeep` | 1 | `01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b` |
+| `app/vendor/.gitkeep` | 1 | `01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b` |
+| `docs/BUSINESS_RULES.md` | 2201 | `7399737139d417d289567055e281156c8f4049a01acb92835d7497e4331ddc91` |
+| `docs/CATATAN_PERBAIKAN.txt` | 1806 | `6e568b69fc859c196082acd2c95b1ae148a18137a5c33ca61e448f7d0dfd88de` |
+| `tests/test_ussd_response.py` | 6956 | `a69b55cfb8607cdb7c8af62fd707201d6eb77ca0c3fbffb72276e563e08e4f5a` |
+| `README_SETUP.md` | 1593 | `9e87dec4f950ac100ec514c85072a9f948ee38c48d04cd36be1013914f63c355` |
+| `RC_CHECKLIST.md` | 1476 | `5dcf8e72b27e414cd5666cf6c97b0ce6f5bd25e428c2d9c3c42b419187d8be2f` |
+| `VERSION.txt` | 137 | `a2d1ff1f8e7be31e0934bfc06119dd320f1f57916734db6029e21202c67957e3` |
+
+## Included directories
+
+- `app/logs/` — empty runtime log location, preserved by `.gitkeep`.
+- `app/vendor/` — optional vendor path, preserved by `.gitkeep`.
+
+## Deliberately excluded
+
+- `.venv/`, `__pycache__/`, `*.pyc`, test/editor caches.
+- `logs/*.log` and other generated logs.
+- `hasil_panen.db` and other local databases.
+- `license.key` and `telegram_login.session` (machine/account-local data).
+- `tmp_verify_telegram.py` and `verify_telegram_check.py` (temporary verification scripts).
+
+## Verification result
+
+Before the ZIP was produced, the package was scanned for `*.db`, `*.key`, `*.session`, `*.pyc`, and `*.log`; no such files were present.

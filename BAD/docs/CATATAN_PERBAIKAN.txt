@@ -1,0 +1,33 @@
+PERBAIKAN KINERJA DAN DETEKSI SIM
+=================================
+
+Versi ini tetap mempertahankan PortWorker per modem agar perubahan SIM
+NOT_INSERTED -> READY dapat dideteksi pada polling CPIN berikutnya.
+
+Perbaikan yang diterapkan:
+1. Memperbaiki deadlock PortRegistry: update() sebelumnya mengambil Lock lalu
+   memanggil ensure() yang mengambil Lock sama untuk kedua kalinya. Lock kini
+   memakai RLock.
+2. Semua update dari worker modem masuk antrean. Hanya main thread yang
+   menyentuh Tkinter, dengan pembaruan UI digabung tiap 100 ms.
+3. Scan COM berjalan di background; scheduler scan hanya dibuat satu kali.
+   Memilih filter tidak lagi menciptakan rangkaian scan berulang.
+4. Worker untuk port yang sudah hilang dihentikan dan dibuang dari daftar.
+5. Memperbaiki flow reaktivasi: USSD cek NIK dijalankan sebelum res_nik
+   dipakai. Bypass kartu sekarang selesai dengan return yang jelas.
+
+Catatan pengujian:
+- Lakukan uji pada komputer modem sebenarnya dengan memasukkan dan mencabut
+  SIM beberapa kali. Target respons status adalah satu interval polling CPIN
+  (sekitar 3 detik pada kode saat ini).
+- Jika jumlah modem nyata sangat besar, kurangi interval scan daftar COM
+  (bukan polling CPIN) hanya bila diperlukan; UI kini tidak lagi diblokir.
+
+FSM V3 (revisi berikutnya):
+- Setelah CPIN READY, worker menunggu stabilisasi sinyal 15 detik.
+- Sistem cek nomor dan masa aktif, lalu menghitung TGL_AKTIF - hari ini.
+- AKTIF (>0) dan TENGGANG (0 sampai -30): bila checkbox bypass dicentang,
+  flow berhenti; bila tidak, nomor dicatat ke tabel status_kartu tanpa injeksi.
+- HANGUS (<= -31): cek NIK, cari KK lokal lalu Telegram bila perlu, injeksi,
+  cek ulang masa aktif, dan hanya dinyatakan SUKSES bila status menjadi AKTIF.
+- Semua hasil reaktivasi dicatat pada tabel riwayat_reaktivasi.

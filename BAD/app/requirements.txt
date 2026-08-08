@@ -1,0 +1,3 @@
+pyserial
+customtkinter
+telethon>=1.36,<2

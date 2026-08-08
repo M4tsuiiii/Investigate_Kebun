@@ -1,0 +1,5 @@
+Product: Kebun Reaktivasi
+Release: RC-1
+Package date: 2026-08-04
+Target: Windows field testing
+Source code modified for this package: No
