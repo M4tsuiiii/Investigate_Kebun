@@ -469,6 +469,8 @@ class AutomationEngine:
     # Maps SkillResult.data keys → PortWorkerState field names
     _SKILL_RESULT_TO_STATE: Dict[str, str] = {
         "number": "nomor",
+        "nik": "nik",
+        "kk": "kk",
         "grace_date": "masa_aktif",
     }
 
@@ -479,20 +481,34 @@ class AutomationEngine:
         "modem_online": "modem_online",
         "ready": "ready",
         "injected": "injected",
+        "provisional": "provisional",
+        "success": "success",
     }
 
     def _on_step_complete(self, step_name: str, skill_result: Any, context: Any) -> None:
         """Callback after each skill step: map result → PortWorkerState → EventBus.
 
         Sprint 15U: This is the bridge that makes skill data reach the UI.
+        BUILD-B: Added [COMMAND] and [RESULT] tracing.
         """
+        port = skill_result.port
+        data = skill_result.data
+
+        # [RESULT] trace — every step result
+        logger.info("[RESULT] PORT=%s SKILL=%s SUCCESS=%s DATA_KEYS=%s",
+                     port, step_name, skill_result.success,
+                     list(data.keys()) if data else [])
+
         if not skill_result.success:
             return
 
-        data = skill_result.data
-        port = skill_result.port
         if not data or not port:
             return
+
+        # [COMMAND] trace — what command was used (from data if available)
+        ussd_code = data.get("ussd_code") or data.get("raw_cnum")
+        if ussd_code:
+            logger.info("[COMMAND] PORT=%s SKILL=%s COMMAND=%s", port, step_name, ussd_code)
 
         # 1. Update PortWorkerState card data via WorkerManager
         card_updates: Dict[str, str] = {}

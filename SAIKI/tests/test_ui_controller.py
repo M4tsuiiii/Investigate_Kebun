@@ -112,11 +112,11 @@ class TestUIControllerGlobalActions(unittest.TestCase):
         self.controller, self.event_bus, self.worker_manager, _, self.automation_engine, _ = _make_controller()
 
     def test_handle_restart_all(self):
-        """Verify _handle_restart_all calls force_retry on all workers."""
+        """Verify _handle_restart_all enqueues hardware_restart for all workers."""
         mock_worker = MagicMock()
         self.worker_manager.workers = {"COM3": mock_worker}
         self.controller._handle_restart_all({})
-        mock_worker.force_retry.assert_called_once()
+        self.automation_engine.enqueue_workflow.assert_called()
 
     def test_handle_stop_all(self):
         """Verify _handle_stop_all calls worker_manager.stop_all() and automation_engine.stop()."""
@@ -159,7 +159,7 @@ class TestUIControllerMassActions(unittest.TestCase):
         self.worker_manager.workers = {"COM1": MagicMock()}
         self.worker_manager.get_active_ports.return_value = ["COM1"]
         self.controller._handle_mass_cek_nomor({})
-        self.automation_engine.enqueue_workflow.assert_called_with("COM1", "check_data", priority=10)
+        self.automation_engine.enqueue_workflow.assert_called_with("COM1", "check_number", priority=10, trigger_id=2)
 
 
 class TestUIControllerConfig(unittest.TestCase):

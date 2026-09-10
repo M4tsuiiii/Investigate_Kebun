@@ -49,7 +49,7 @@
 | Steps | `["cek_nik"]` |
 
 **Skill**: CekNikSkill  
-**Modem commands**: USSD `*185#`  
+**Modem commands**: USSD `*888*4444*1#`  
 **Expected response**: NIK information payload  
 **Success condition**: Non-empty USSD response  
 **Failure conditions**: No USSD runtime, USSD dial failed, empty response
@@ -65,10 +65,10 @@
 | Steps | `["cek_kk"]` |
 
 **Skill**: CekKkSkill  
-**Modem commands**: USSD `*185#`  
+**Source**: Cache, database, or Telegram (NOT USSD)  
 **Expected response**: KK information payload  
-**Success condition**: Non-empty USSD response  
-**Failure conditions**: No USSD runtime, USSD dial failed, empty response
+**Success condition**: KK found in cache/DB  
+**Failure conditions**: No KK found in cache, database, or Telegram
 
 ---
 
@@ -88,22 +88,6 @@
 
 ---
 
-### WF-006: HARDWARE_RESET
-
-| Field | Value |
-|-------|-------|
-| Name | `hardware_reset` |
-| Trigger | Manual (Reset Port / Reset Modem) |
-| Steps | `["reset_hardware"]` |
-
-**Skill**: ResetHardwareSkill  
-**Modem commands**: Close serial → wait 15s → reopen → `AT+CPIN?`  
-**Expected response**: Serial reopens, +CPIN: READY  
-**Success condition**: Modem online AND CpinState = READY  
-**Failure conditions**: No serial, failed to reopen, modem offline, SIM not ready
-
----
-
 ## 2. Composite Workflows (multi-skill)
 
 ### WF-010: CHECK_DATA
@@ -116,8 +100,8 @@
 
 **Execution order**:
 1. `cek_nomor` → AT+CNUM → get phone number
-2. `cek_nik` → USSD *185# → get NIK
-3. `cek_kk` → USSD *185# → get KK
+2. `cek_nik` → USSD *888*4444*1# → get NIK
+3. `cek_kk` → cache/DB/Telegram → get KK
 
 **Success condition**: All 3 steps succeed  
 **Failure**: Stops at first failure  
@@ -154,9 +138,9 @@
 **Execution order**:
 1. `cek_nomor` → AT+CNUM → get phone number
 2. `cek_status` → AT+CPIN? → verify SIM ready
-3. `cek_nik` → USSD *185# → get NIK
-4. `cek_kk` → USSD *185# → get KK
-5. `inject_reaktivasi` → USSD *185# → send reactivation
+3. `cek_nik` → USSD *888*4444*1# → get NIK
+4. `cek_kk` → cache/DB/Telegram → get KK
+5. `inject_reaktivasi` → USSD *888*89*1*{NIK}*{KK}# → send reactivation
 6. `verify_grace` → USSD *185# → check card status
 
 **Success condition**: All 6 steps succeed, card is AKTIF/TENGGANG  

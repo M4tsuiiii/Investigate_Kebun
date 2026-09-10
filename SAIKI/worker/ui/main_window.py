@@ -257,11 +257,8 @@ class MainWindow:
                           command=self._on_mass_cek_nomor).pack(side="left", padx=5, pady=7)
             ctk.CTkButton(action_bar, text="Restart All", fg_color="#2F4156", text_color="#FFFFFF", width=100,
                           command=self._on_restart_all).pack(side="left", padx=5, pady=7)
-            ctk.CTkButton(action_bar, text="Reset Modem", fg_color="#2F4156", text_color="#FFFFFF", width=100,
-                          command=self._on_reset_modem).pack(side="left", padx=5, pady=7)
         except ImportError:
             tk.Button(action_bar, text="Restart All", command=self._on_restart_all).pack(side="left", padx=5)
-            tk.Button(action_bar, text="Reset Modem", command=self._on_reset_modem).pack(side="left", padx=5)
 
         # Port table
         self._port_table = PortStatusTable(self._body, on_log_click=self._on_log_click)
@@ -437,28 +434,6 @@ class MainWindow:
         logger.info("[COMMAND CLICK] COMMAND=restart_all PORT=MASS SOURCE=workspace_button THREAD=%s",
                      threading.current_thread().name)
         self._event_bus.publish(CommandEvent.RESTART_ALL.value, {
-            "source": "workspace_button",
-        })
-
-    def _on_reset_modem(self) -> None:
-        """Publish reset modem event with selected port."""
-        selected_port = None
-        if self._port_table:
-            selected_port = self._port_table.get_selection()
-
-        logger.info("[COMMAND CLICK] COMMAND=reset_modem PORT=%s SOURCE=workspace_button THREAD=%s",
-                     selected_port or "NONE", threading.current_thread().name)
-
-        if not selected_port:
-            logger.info("[COMMAND RESULT] COMMAND=reset_modem OUTCOME=skipped MESSAGE=no_port_selected")
-            if self._event_bus:
-                self._event_bus.publish(UIEvent.MASS_PROGRESS.value, {
-                    "message": "Pilih port terlebih dahulu (klik baris port, lalu Reset Modem)",
-                })
-            return
-
-        self._event_bus.publish(CommandEvent.RESET_MODEM.value, {
-            "port": selected_port,
             "source": "workspace_button",
         })
 

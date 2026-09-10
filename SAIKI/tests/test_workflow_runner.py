@@ -36,6 +36,8 @@ def _make_skill(
         skill_name=name,
         port="COM3",
     )
+    # BUILD-B: Remove auto-created resolve attribute so runner uses skill directly
+    del skill.resolve
     return skill
 
 
@@ -44,6 +46,8 @@ def _make_failing_skill(name: str, error: str = "skill failed") -> MagicMock:
     skill = MagicMock()
     skill.name = name
     skill.execute.side_effect = RuntimeError(error)
+    # BUILD-B: Remove auto-created resolve attribute so runner uses skill directly
+    del skill.resolve
     return skill
 
 
