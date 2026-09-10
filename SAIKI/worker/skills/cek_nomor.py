@@ -1,16 +1,10 @@
 """Skill: Cek Nomor — Retrieve SIM phone number via AT+CNUM or USSD fallback.
 
-Sprint 15S.2: Real number retrieval, not just AT alive check.
-1. Send AT+CNUM through target port's ATClient.
-2. Parse MSISDN from +CNUM response.
-3. If CNUM has no usable number, use configured USSD fallback.
-4. Update NOMOR column via result data.
-
-Sprint 15T: Added forensic instrumentation.
+Commands and parsers are read from CommandRegistry and ParserRegistry.
+No hardcoded command strings.
 """
 
 import logging
-import re
 import time
 from typing import Any, Dict, Optional
 
@@ -23,14 +17,17 @@ class CekNomorSkill(Skill):
     """Retrieve SIM phone number.
 
     Execution order:
-    1. AT+CNUM → parse MSISDN
-    2. If no number from CNUM → configured USSD fallback
+    1. AT+CNUM -> parse MSISDN
+    2. If no number from CNUM -> configured USSD fallback
     3. Parse number from USSD response
     """
 
-    def __init__(self, at_client: object, ussd_runtime: object = None) -> None:
+    def __init__(self, at_client: object, ussd_runtime: object = None,
+                 command_registry: object = None, parser_registry: object = None) -> None:
         self._at_client = at_client
         self._ussd_runtime = ussd_runtime
+        self._cmd_reg = command_registry
+        self._parser_reg = parser_registry
 
     @property
     def name(self) -> str:
@@ -47,9 +44,7 @@ class CekNomorSkill(Skill):
 
         timeout: float = kwargs.get("timeout", 5.0)
 
-        logger.info("[CEK NOMOR START] PORT=%s COMMAND_ID=%s", port, command_id)
-
-        # Resolve per-port AT client and USSD runtime (Sprint 15S.2)
+        # Resolve per-port dependencies
         at_client = self._at_client
         ussd_runtime = self._ussd_runtime
         resolver = kwargs.get("skill_resolver")
@@ -68,11 +63,21 @@ class CekNomorSkill(Skill):
             logger.info("[PERFORMANCE TRACE] SKILL=cek_nomor PORT=%s DURATION_MS=%d", port, _dur_ms)
             return self._failure(port, "No AT client available")
 
+        # Get command from registry
+        at_command = "AT+CNUM"
+        ussd_code = ""
+        parser_name = "parse_cnum"
+        if self._cmd_reg:
+            profile = self._cmd_reg.get("cek_nomor")
+            if profile:
+                at_command = profile.at_command or at_command
+                parser_name = profile.parser_name or parser_name
+
         # Step 1: AT+CNUM
-        logger.info("[CEK NOMOR CNUM] PORT=%s COMMAND_ID=%s SENDING AT+CNUM", port, command_id)
-        logger.info("[MODEM ACTION] PORT=%s COMMAND=AT+CNUM PAYLOAD=AT+CNUM", port)
+        logger.info("[CEK NOMOR CNUM] PORT=%s COMMAND_ID=%s SENDING %s", port, command_id, at_command)
+        logger.info("[MODEM ACTION] PORT=%s COMMAND=%s PAYLOAD=%s", port, at_command, at_command)
         try:
-            response = at_client.send_command("AT+CNUM", timeout=timeout)
+            response = at_client.send_command(at_command, timeout=timeout)
         except Exception as e:
             logger.info("[CEK NOMOR CNUM] PORT=%s COMMAND_ID=%s EXCEPTION=%s", port, command_id, e)
             response = None
@@ -82,12 +87,12 @@ class CekNomorSkill(Skill):
         raw_cnum = ""
         if response and response.success:
             raw_cnum = response.raw or ""
-            parsed_number = self._parse_cnum(raw_cnum)
+            if self._parser_reg:
+                parsed = self._parser_reg.parse(parser_name, raw_cnum)
+                parsed_number = parsed.get("number")
             logger.info("[MODEM INTERPRETATION] PORT=%s RAW=%s PARSED=%s RESULT=%s",
                          port, repr(raw_cnum), repr(parsed_number),
                          "SUCCESS" if parsed_number else "NO_NUMBER")
-            if parsed_number:
-                logger.info("[CEK NOMOR CNUM] PORT=%s COMMAND_ID=%s NUMBER=%s", port, command_id, parsed_number)
         else:
             raw_resp = response.raw if response else "None"
             logger.info("[MODEM INTERPRETATION] PORT=%s RAW=%s PARSED=None RESULT=FAILED", port, repr(raw_resp))
@@ -102,13 +107,12 @@ class CekNomorSkill(Skill):
                     logger.info("[MODEM ACTION] PORT=%s COMMAND=USSD PAYLOAD=%s", port, ussd_code)
                     ussd_response = ussd_runtime.dial(ussd_code, timeout=30.0)
                     if ussd_response:
-                        parsed_number = self._parse_ussd_number(ussd_response)
+                        if self._parser_reg:
+                            parsed = self._parser_reg.parse("extract_number_from_ussd", ussd_response)
+                            parsed_number = parsed.get("number")
                         logger.info("[MODEM INTERPRETATION] PORT=%s RAW=%s PARSED=%s RESULT=%s",
                                      port, repr(ussd_response), repr(parsed_number),
                                      "SUCCESS" if parsed_number else "NO_NUMBER")
-                        if parsed_number:
-                            logger.info("[CEK NOMOR PARSED] PORT=%s COMMAND_ID=%s NUMBER=%s SOURCE=USSD",
-                                         port, command_id, parsed_number)
                     else:
                         logger.info("[MODEM INTERPRETATION] PORT=%s RAW=None PARSED=None RESULT=USSD_NO_RESPONSE", port)
                 else:
@@ -140,32 +144,6 @@ class CekNomorSkill(Skill):
             logger.info("[CEK NOMOR RESULT] PORT=%s COMMAND_ID=%s OUTCOME=failed REASON=no_number_found",
                          port, command_id)
             return self._failure(port, "no_number_found")
-
-    def _parse_cnum(self, raw: str) -> Optional[str]:
-        """Parse MSISDN from +CNUM response.
-
-        Format: +CNUM: "","number",type
-        Example: +CNUM: "","081234567890",129
-        """
-        if not raw:
-            return None
-        match = re.search(r'\+CNUM:\s*"",\s*"(\d+)"', raw)
-        if match:
-            return match.group(1).strip()
-        return None
-
-    def _parse_ussd_number(self, raw: str) -> Optional[str]:
-        """Extract phone number from USSD response text."""
-        if not raw:
-            return None
-        # Look for common phone number patterns (10-13 digits)
-        match = re.search(r'(0\d{9,12})', raw)
-        if match:
-            return match.group(1)
-        match = re.search(r'(\+62\d{9,12})', raw)
-        if match:
-            return match.group(1)
-        return None
 
     def _get_ussd_code(self, kwargs: Dict[str, Any]) -> Optional[str]:
         """Get configured number-check USSD code from settings."""

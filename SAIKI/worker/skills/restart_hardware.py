@@ -1,6 +1,11 @@
 """Skill: Restart Hardware — Send ATZ and wait for modem.
 
-Sprint 15T: Added forensic instrumentation.
+Commands and parsers are read from CommandRegistry and ParserRegistry.
+No hardcoded command strings.
+
+Restart types:
+- Tunggal: restart 1 port
+- Massal: restart semua port
 """
 
 import logging
@@ -15,12 +20,15 @@ logger = logging.getLogger("saiki.skill.restart_hardware")
 
 class RestartHardwareSkill(Skill):
     """Restart modem hardware via ATZ command.
-    
+
     Sends ATZ, waits for stabilization, then checks if modem is back online.
     """
 
-    def __init__(self, at_client: object) -> None:
+    def __init__(self, at_client: object,
+                 command_registry: object = None, parser_registry: object = None) -> None:
         self._at_client = at_client
+        self._cmd_reg = command_registry
+        self._parser_reg = parser_registry
 
     @property
     def name(self) -> str:
@@ -43,7 +51,7 @@ class RestartHardwareSkill(Skill):
             logger.info("[PERFORMANCE TRACE] SKILL=restart_hardware PORT=%s DURATION_MS=%d", port, _dur_ms)
             return self._failure(port, "No AT client available")
 
-        # Resolve per-port AT client (Sprint 15S.2)
+        # Resolve per-port AT client
         at_client = self._at_client
         resolver = kwargs.get("skill_resolver")
         if resolver:
@@ -53,9 +61,18 @@ class RestartHardwareSkill(Skill):
             resolver.log_binding("restart_hardware", "AT_CLIENT",
                                  resolver.port if hasattr(resolver, 'port') else port)
 
+        # Get command from registry
+        at_command = "ATZ"
+        parser_name = "check_modem"
+        if self._cmd_reg:
+            profile = self._cmd_reg.get("restart_hardware")
+            if profile:
+                at_command = profile.at_command or at_command
+                parser_name = profile.parser_name or parser_name
+
         # Send restart command
-        logger.info("[MODEM ACTION] PORT=%s COMMAND=ATZ PAYLOAD=ATZ", port)
-        response = at_client.send_command("ATZ", timeout=timeout)
+        logger.info("[MODEM ACTION] PORT=%s COMMAND=%s PAYLOAD=%s", port, at_command, at_command)
+        response = at_client.send_command(at_command, timeout=timeout)
         logger.info("[MODEM INTERPRETATION] PORT=%s RAW=%s PARSED=%s RESULT=%s",
                      port, repr(response.raw if response else ""),
                      "success" if response and response.success else "failed",

@@ -15,7 +15,6 @@ class WorkflowRegistry:
     - reactivate_fast: inject_reaktivasi → verify_grace
     - reactivate_full: cek_nomor → cek_status → cek_nik → cek_kk → inject_reaktivasi → verify_grace
     - hardware_restart: restart_hardware
-    - hardware_reset: reset_hardware
     """
     
     def __init__(self) -> None:
@@ -37,12 +36,12 @@ class WorkflowRegistry:
         ))
         self.register(WorkflowDefinition(
             name="check_nik",
-            description="Check NIK via USSD",
+            description="Check NIK via USSD *888*4444*1#",
             steps=["cek_nik"],
         ))
         self.register(WorkflowDefinition(
             name="check_kk",
-            description="Check KK via USSD",
+            description="Check KK from cache/DB/Telegram",
             steps=["cek_kk"],
         ))
 
@@ -67,14 +66,8 @@ class WorkflowRegistry:
 
         self.register(WorkflowDefinition(
             name="hardware_restart",
-            description="Restart modem hardware",
+            description="Restart modem hardware via ATZ",
             steps=["restart_hardware"],
-        ))
-
-        self.register(WorkflowDefinition(
-            name="hardware_reset",
-            description="Full hardware reset cycle",
-            steps=["reset_hardware"],
         ))
     
     def register(self, workflow: WorkflowDefinition) -> None:

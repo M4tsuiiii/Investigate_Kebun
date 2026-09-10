@@ -1,7 +1,7 @@
 """Tests for workflow.registry — WorkflowRegistry.
 
 WorkflowRegistry stores and retrieves workflow definitions.
-Pre-registers 5 built-in workflows on init.
+Pre-registers 8 built-in workflows on init (hardware_reset removed in BUILD-A).
 """
 
 import unittest
@@ -16,12 +16,15 @@ class TestWorkflowRegistryDefaults(unittest.TestCase):
     def test_default_workflows_registered(self) -> None:
         reg = WorkflowRegistry()
         names = reg.list_workflows()
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 8)
+        self.assertIn("check_number", names)
+        self.assertIn("check_status", names)
+        self.assertIn("check_nik", names)
+        self.assertIn("check_kk", names)
         self.assertIn("check_data", names)
         self.assertIn("reactivate_fast", names)
         self.assertIn("reactivate_full", names)
         self.assertIn("hardware_restart", names)
-        self.assertIn("hardware_reset", names)
 
     def test_get_returns_workflow(self) -> None:
         reg = WorkflowRegistry()
@@ -49,7 +52,7 @@ class TestWorkflowRegistryList(unittest.TestCase):
         defs = reg.list_definitions()
         self.assertIsInstance(defs, list)
         self.assertTrue(all(isinstance(d, WorkflowDefinition) for d in defs))
-        self.assertEqual(len(defs), 5)
+        self.assertEqual(len(defs), 8)
 
 
 class TestWorkflowRegistryHas(unittest.TestCase):
@@ -59,12 +62,12 @@ class TestWorkflowRegistryHas(unittest.TestCase):
         reg = WorkflowRegistry()
         self.assertTrue(reg.has("check_data"))
         self.assertTrue(reg.has("reactivate_fast"))
-        self.assertTrue(reg.has("hardware_reset"))
+        self.assertTrue(reg.has("hardware_restart"))
 
     def test_has_false_for_unknown(self) -> None:
         reg = WorkflowRegistry()
         self.assertFalse(reg.has("nonexistent"))
-        self.assertFalse(reg.has(""))
+        self.assertFalse(reg.has("hardware_reset"))
 
 
 class TestWorkflowRegistryRegister(unittest.TestCase):
@@ -83,7 +86,7 @@ class TestWorkflowRegistryRegister(unittest.TestCase):
         wf = reg.get("custom_flow")
         self.assertIsNotNone(wf)
         self.assertEqual(wf.steps, ["step_a", "step_b"])
-        self.assertEqual(len(reg.list_workflows()), 6)
+        self.assertEqual(len(reg.list_workflows()), 9)
 
 
 class TestWorkflowRegistryRemove(unittest.TestCase):
@@ -94,13 +97,13 @@ class TestWorkflowRegistryRemove(unittest.TestCase):
         result = reg.remove("hardware_restart")
         self.assertTrue(result)
         self.assertFalse(reg.has("hardware_restart"))
-        self.assertEqual(len(reg.list_workflows()), 4)
+        self.assertEqual(len(reg.list_workflows()), 7)
 
     def test_remove_non_existing_returns_false(self) -> None:
         reg = WorkflowRegistry()
         result = reg.remove("nonexistent")
         self.assertFalse(result)
-        self.assertEqual(len(reg.list_workflows()), 5)
+        self.assertEqual(len(reg.list_workflows()), 8)
 
 
 class TestWorkflowRegistryBuiltinSteps(unittest.TestCase):
@@ -128,11 +131,6 @@ class TestWorkflowRegistryBuiltinSteps(unittest.TestCase):
         reg = WorkflowRegistry()
         wf = reg.get("hardware_restart")
         self.assertEqual(wf.steps, ["restart_hardware"])
-
-    def test_hardware_reset_steps(self) -> None:
-        reg = WorkflowRegistry()
-        wf = reg.get("hardware_reset")
-        self.assertEqual(wf.steps, ["reset_hardware"])
 
 
 if __name__ == "__main__":

@@ -29,7 +29,6 @@ COMMAND_ROUTES = [
     ("cmd.cari_kk",         "cari_kk",         "check_kk",          "per_port", "sim_ready",  "Cari KK"),
     ("cmd.cek_limit",       "cek_limit",       "check_number",      "per_port", "sim_ready",  "Cek Limit"),
     ("cmd.reactivate",      "reaktivasi",      "reactivate_full",   "per_port", "sim_ready",  "Reaktivasi"),
-    ("cmd.reset_modem",     "reset_modem",     "hardware_reset",    "per_port", "hw_ready",   "Reset Modem"),
     ("cmd.restart_port",    "restart_port",    "hardware_restart",  "per_port", "hw_ready",   "Restart Port"),
     ("cmd.force_retry",     "force_retry",     None,                "per_port", "worker_alive","Reprocess"),
     ("cmd.mass.cek_nomor",  "mass.cek_nomor",  "check_number",      "mass",     "sim_ready",  "Cek Nomor Massal"),
@@ -56,7 +55,6 @@ PER_PORT_COMMAND_MAP = {
     "cmd.cari_kk":        "check_kk",
     "cmd.cek_limit":      "check_number",
     "cmd.reactivate":     "reactivate_full",
-    "cmd.reset_modem":    "hardware_reset",
     "cmd.restart_port":   "hardware_restart",
     "cmd.force_retry":    None,  # handled directly
 }
@@ -127,7 +125,6 @@ class UIController:
         self._event_bus.subscribe(CommandEvent.PORT_INCLUDE.value, self._handle_port_include)
         self._event_bus.subscribe(CommandEvent.RESTART_ALL.value, self._handle_restart_all)
         self._event_bus.subscribe(CommandEvent.STOP_ALL.value, self._handle_stop_all)
-        self._event_bus.subscribe(CommandEvent.RESET_MODEM.value, self._handle_reset_modem)
         self._event_bus.subscribe(CommandEvent.FORCE_RETRY.value, self._handle_force_retry)
 
         # Auto-run toggle

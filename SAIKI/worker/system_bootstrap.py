@@ -68,6 +68,12 @@ class SystemBootstrap:
         # Auto-run config
         self.auto_run_config = AutoRunConfig()
         
+        # Command and Parser registries (BUILD-A)
+        from worker.command_registry import CommandRegistry
+        from worker.parser_registry import ParserRegistry
+        self.command_registry = CommandRegistry()
+        self.parser_registry = ParserRegistry()
+        
         # Modem validator (Sprint 11A, 13 — with baud detection)
         self.modem_validator = ModemValidator(timeout=2.0, retries=2, baud_rates=MODEM_BAUD_RATES)
 
@@ -211,21 +217,17 @@ class SystemBootstrap:
         # skill_resolver kwarg to resolve per-port dependencies at execution time.
         if not self._skill_map:
             if at_client:
-                self._skill_map["cek_nomor"] = _CekNomorSkillFactory()
-                self._skill_map["cek_status"] = _CekStatusSkillFactory()
-                self._skill_map["restart_hardware"] = _RestartHardwareSkillFactory()
+                self._skill_map["cek_nomor"] = _CekNomorSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["cek_status"] = _CekStatusSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["restart_hardware"] = _RestartHardwareSkillFactory(self.command_registry, self.parser_registry)
                 logger.info("[WIRE] AT skill factories registered")
 
             if ussd_runtime:
-                self._skill_map["cek_nik"] = _CekNikSkillFactory()
-                self._skill_map["cek_kk"] = _CekKkSkillFactory()
-                self._skill_map["inject_reaktivasi"] = _InjectReaktivasiSkillFactory()
-                self._skill_map["verify_grace"] = _VerifyGraceSkillFactory()
+                self._skill_map["cek_nik"] = _CekNikSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["cek_kk"] = _CekKkSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["inject_reaktivasi"] = _InjectReaktivasiSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["verify_grace"] = _VerifyGraceSkillFactory(self.command_registry, self.parser_registry)
                 logger.info("[WIRE] USSD skill factories registered")
-
-            if serial and at_client:
-                self._skill_map["reset_hardware"] = _ResetHardwareSkillFactory()
-                logger.info("[WIRE] Reset skill factory registered")
 
         # Wire workflow runner to use this bootstrap's port_workers
         self.workflow_runner.set_port_workers(self._port_workers)
@@ -689,6 +691,10 @@ class SystemBootstrap:
 
 class _SkillFactoryBase:
     """Base for skill factories. Creates skill instances with resolved deps."""
+    def __init__(self, command_registry=None, parser_registry=None):
+        self._cmd_reg = command_registry
+        self._parser_reg = parser_registry
+
     def resolve(self, resolver):
         raise NotImplementedError
 
@@ -698,7 +704,8 @@ class _CekNomorSkillFactory(_SkillFactoryBase):
         from worker.skills.cek_nomor import CekNomorSkill
         at_client = resolver.get_at_client()
         resolver.log_binding("cek_nomor", "AT_CLIENT", resolver.port)
-        return CekNomorSkill(at_client, ussd_runtime=resolver.get_ussd_runtime())
+        return CekNomorSkill(at_client, ussd_runtime=resolver.get_ussd_runtime(),
+                             command_registry=self._cmd_reg, parser_registry=self._parser_reg)
 
 
 class _CekStatusSkillFactory(_SkillFactoryBase):
@@ -706,7 +713,7 @@ class _CekStatusSkillFactory(_SkillFactoryBase):
         from worker.skills.cek_status import CekStatusSkill
         at_client = resolver.get_at_client()
         resolver.log_binding("cek_status", "AT_CLIENT", resolver.port)
-        return CekStatusSkill(at_client)
+        return CekStatusSkill(at_client, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
 
 
 class _CekNikSkillFactory(_SkillFactoryBase):
@@ -714,7 +721,7 @@ class _CekNikSkillFactory(_SkillFactoryBase):
         from worker.skills.cek_nik import CekNikSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("cek_nik", "USSD", resolver.port)
-        return CekNikSkill(ussd)
+        return CekNikSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
 
 
 class _CekKkSkillFactory(_SkillFactoryBase):
@@ -722,7 +729,7 @@ class _CekKkSkillFactory(_SkillFactoryBase):
         from worker.skills.cek_kk import CekKkSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("cek_kk", "USSD", resolver.port)
-        return CekKkSkill(ussd)
+        return CekKkSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
 
 
 class _InjectReaktivasiSkillFactory(_SkillFactoryBase):
@@ -730,7 +737,7 @@ class _InjectReaktivasiSkillFactory(_SkillFactoryBase):
         from worker.skills.inject_reaktivasi import InjectReaktivasiSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("inject_reaktivasi", "USSD", resolver.port)
-        return InjectReaktivasiSkill(ussd)
+        return InjectReaktivasiSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
 
 
 class _VerifyGraceSkillFactory(_SkillFactoryBase):
@@ -738,7 +745,7 @@ class _VerifyGraceSkillFactory(_SkillFactoryBase):
         from worker.skills.verify_grace import VerifyGraceSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("verify_grace", "USSD", resolver.port)
-        return VerifyGraceSkill(ussd)
+        return VerifyGraceSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
 
 
 class _RestartHardwareSkillFactory(_SkillFactoryBase):
@@ -746,14 +753,4 @@ class _RestartHardwareSkillFactory(_SkillFactoryBase):
         from worker.skills.restart_hardware import RestartHardwareSkill
         at_client = resolver.get_at_client()
         resolver.log_binding("restart_hardware", "AT_CLIENT", resolver.port)
-        return RestartHardwareSkill(at_client)
-
-
-class _ResetHardwareSkillFactory(_SkillFactoryBase):
-    def resolve(self, resolver):
-        from worker.skills.reset_hardware import ResetHardwareSkill
-        serial = resolver.get_serial()
-        at_client = resolver.get_at_client()
-        cpin = resolver.get_cpin_runtime()
-        resolver.log_binding("reset_hardware", "SERIAL", resolver.port)
-        return ResetHardwareSkill(serial, at_client, cpin)
+        return RestartHardwareSkill(at_client, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
