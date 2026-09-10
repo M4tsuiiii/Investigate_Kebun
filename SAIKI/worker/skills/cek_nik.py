@@ -23,10 +23,12 @@ class CekNikSkill(Skill):
     """
 
     def __init__(self, ussd_runtime: object,
-                 command_registry: object = None, parser_registry: object = None) -> None:
+                 command_registry: object = None, parser_registry: object = None,
+                 phone_cache: object = None) -> None:
         self._ussd_runtime = ussd_runtime
         self._cmd_reg = command_registry
         self._parser_reg = parser_registry
+        self._phone_cache = phone_cache
 
     @property
     def name(self) -> str:
@@ -95,5 +97,12 @@ class CekNikSkill(Skill):
         if _dur_ms > 2000:
             logger.info("[SLOW OPERATION] SKILL=cek_nik PORT=%s DURATION_MS=%d", port, _dur_ms)
         logger.info("[PERFORMANCE TRACE] SKILL=cek_nik PORT=%s DURATION_MS=%d", port, _dur_ms)
+
+        # BUILD-C: Save NIK to phone cache if available
+        nik_val = parsed.get("nik", "")
+        nomor = kwargs.get("nomor", "")
+        if nik_val and nomor and self._phone_cache:
+            self._phone_cache.put(nomor, nik=nik_val, source="ussd")
+            logger.info("[CEK NIK] PORT=%s CACHE_UPDATE nomor=%s nik=%s", port, nomor, nik_val[:4] + "****")
 
         return self._success(port, parsed)

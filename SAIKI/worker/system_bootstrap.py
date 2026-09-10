@@ -43,6 +43,11 @@ from worker.skills.inject_reaktivasi import InjectReaktivasiSkill
 from worker.skills.verify_grace import VerifyGraceSkill
 from worker.skills.restart_hardware import RestartHardwareSkill
 from worker.skills.reset_hardware import ResetHardwareSkill
+from worker.intelligence.phone_cache import PhoneCache
+from worker.intelligence.db_cache import DbCache
+from worker.intelligence.bypass import BypassFlags
+from worker.intelligence.session_fence import SessionFence
+from worker.intelligence.tier_selection import TierSelection
 
 from app.domain.constants import MODEM_BAUD_RATES
 
@@ -73,6 +78,13 @@ class SystemBootstrap:
         from worker.parser_registry import ParserRegistry
         self.command_registry = CommandRegistry()
         self.parser_registry = ParserRegistry()
+
+        # BUILD-C: Intelligence Layer
+        self.phone_cache = PhoneCache(max_size=10000)
+        self.db_cache = DbCache()
+        self.bypass_flags = BypassFlags()
+        self.session_fence = SessionFence()
+        self.tier_selection = TierSelection()
         
         # Modem validator (Sprint 11A, 13 — with baud detection)
         self.modem_validator = ModemValidator(timeout=2.0, retries=2, baud_rates=MODEM_BAUD_RATES)
@@ -217,15 +229,20 @@ class SystemBootstrap:
         # skill_resolver kwarg to resolve per-port dependencies at execution time.
         if not self._skill_map:
             if at_client:
-                self._skill_map["cek_nomor"] = _CekNomorSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["cek_nomor"] = _CekNomorSkillFactory(
+                    self.command_registry, self.parser_registry, self.phone_cache)
                 self._skill_map["cek_status"] = _CekStatusSkillFactory(self.command_registry, self.parser_registry)
                 self._skill_map["restart_hardware"] = _RestartHardwareSkillFactory(self.command_registry, self.parser_registry)
                 logger.info("[WIRE] AT skill factories registered")
 
             if ussd_runtime:
-                self._skill_map["cek_nik"] = _CekNikSkillFactory(self.command_registry, self.parser_registry)
-                self._skill_map["cek_kk"] = _CekKkSkillFactory(self.command_registry, self.parser_registry)
-                self._skill_map["inject_reaktivasi"] = _InjectReaktivasiSkillFactory(self.command_registry, self.parser_registry)
+                self._skill_map["cek_nik"] = _CekNikSkillFactory(
+                    self.command_registry, self.parser_registry, self.phone_cache)
+                self._skill_map["cek_kk"] = _CekKkSkillFactory(
+                    self.command_registry, self.parser_registry,
+                    self.phone_cache, self.db_cache, self.tier_selection)
+                self._skill_map["inject_reaktivasi"] = _InjectReaktivasiSkillFactory(
+                    self.command_registry, self.parser_registry, self.bypass_flags)
                 self._skill_map["verify_grace"] = _VerifyGraceSkillFactory(self.command_registry, self.parser_registry)
                 logger.info("[WIRE] USSD skill factories registered")
 
@@ -255,6 +272,13 @@ class SystemBootstrap:
                     self._wire_skills_for_worker(port, worker)
 
         self.event_bus.subscribe("ui.port.discovered", on_port_discovered)
+
+        # BUILD-C: Connect DB cache
+        try:
+            self.db_cache.connect()
+            logger.info("[BOOT] DbCache connected")
+        except Exception as e:
+            logger.warning("[BOOT] DbCache connect failed: %s", e)
 
         # 2. Start WorkerManager scanning (non-blocking, scans in background)
         logger.info("[BOOT] Starting WorkerManager scan...")
@@ -300,6 +324,11 @@ class SystemBootstrap:
         logger.info("[BOOT] Stopping system...")
         self.automation_engine.stop()
         self.worker_manager.stop_all()
+        # BUILD-C: Close DB cache
+        try:
+            self.db_cache.close()
+        except Exception:
+            pass
         logger.info("[BOOT] System stopped.")
     
     def _print_startup_report(self, scan_duration: float = 0.0) -> None:
@@ -700,12 +729,17 @@ class _SkillFactoryBase:
 
 
 class _CekNomorSkillFactory(_SkillFactoryBase):
+    def __init__(self, command_registry=None, parser_registry=None, phone_cache=None):
+        super().__init__(command_registry, parser_registry)
+        self._phone_cache = phone_cache
+
     def resolve(self, resolver):
         from worker.skills.cek_nomor import CekNomorSkill
         at_client = resolver.get_at_client()
         resolver.log_binding("cek_nomor", "AT_CLIENT", resolver.port)
         return CekNomorSkill(at_client, ussd_runtime=resolver.get_ussd_runtime(),
-                             command_registry=self._cmd_reg, parser_registry=self._parser_reg)
+                             command_registry=self._cmd_reg, parser_registry=self._parser_reg,
+                             phone_cache=self._phone_cache)
 
 
 class _CekStatusSkillFactory(_SkillFactoryBase):
@@ -717,27 +751,46 @@ class _CekStatusSkillFactory(_SkillFactoryBase):
 
 
 class _CekNikSkillFactory(_SkillFactoryBase):
+    def __init__(self, command_registry=None, parser_registry=None, phone_cache=None):
+        super().__init__(command_registry, parser_registry)
+        self._phone_cache = phone_cache
+
     def resolve(self, resolver):
         from worker.skills.cek_nik import CekNikSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("cek_nik", "USSD", resolver.port)
-        return CekNikSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
+        return CekNikSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg,
+                           phone_cache=self._phone_cache)
 
 
 class _CekKkSkillFactory(_SkillFactoryBase):
+    def __init__(self, command_registry=None, parser_registry=None,
+                 phone_cache=None, db_cache=None, tier_selection=None):
+        super().__init__(command_registry, parser_registry)
+        self._phone_cache = phone_cache
+        self._db_cache = db_cache
+        self._tier_selection = tier_selection
+
     def resolve(self, resolver):
         from worker.skills.cek_kk import CekKkSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("cek_kk", "USSD", resolver.port)
-        return CekKkSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
+        return CekKkSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg,
+                          phone_cache=self._phone_cache, db_cache=self._db_cache,
+                          tier_selection=self._tier_selection)
 
 
 class _InjectReaktivasiSkillFactory(_SkillFactoryBase):
+    def __init__(self, command_registry=None, parser_registry=None, bypass_flags=None):
+        super().__init__(command_registry, parser_registry)
+        self._bypass_flags = bypass_flags
+
     def resolve(self, resolver):
         from worker.skills.inject_reaktivasi import InjectReaktivasiSkill
         ussd = resolver.get_ussd_runtime()
         resolver.log_binding("inject_reaktivasi", "USSD", resolver.port)
-        return InjectReaktivasiSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg)
+        return InjectReaktivasiSkill(ussd, command_registry=self._cmd_reg, parser_registry=self._parser_reg,
+                                     bypass_flags=self._bypass_flags)
 
 
 class _VerifyGraceSkillFactory(_SkillFactoryBase):

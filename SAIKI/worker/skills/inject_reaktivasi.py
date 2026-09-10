@@ -23,10 +23,12 @@ class InjectReaktivasiSkill(Skill):
     """
 
     def __init__(self, ussd_runtime: object,
-                 command_registry: object = None, parser_registry: object = None) -> None:
+                 command_registry: object = None, parser_registry: object = None,
+                 bypass_flags: object = None) -> None:
         self._ussd_runtime = ussd_runtime
         self._cmd_reg = command_registry
         self._parser_reg = parser_registry
+        self._bypass = bypass_flags
 
     @property
     def name(self) -> str:
@@ -42,6 +44,22 @@ class InjectReaktivasiSkill(Skill):
         logger.info("[SKILL ENTRY] COMMAND_ID=%s PORT=%s SKILL=inject_reaktivasi", command_id, port)
 
         timeout: float = kwargs.get("timeout", 30.0)
+
+        # BUILD-C: Check bypass flags before injection
+        if self._bypass:
+            card_status = kwargs.get("card_status", "")
+            skip_reason = self._bypass.should_skip_injection(card_status)
+            if skip_reason:
+                logger.info("[INJECT REAKTIVASI] PORT=%s SKIP reason=%s card_status=%s",
+                             port, skip_reason, card_status)
+                _dur_ms = int((time.monotonic() - _t_start) * 1000)
+                logger.info("[PERFORMANCE TRACE] SKILL=inject_reaktivasi PORT=%s DURATION_MS=%d", port, _dur_ms)
+                return self._success(port, {
+                    "injected": False,
+                    "skipped": True,
+                    "skip_reason": skip_reason,
+                    "card_status": card_status,
+                })
 
         if not self._ussd_runtime:
             _dur_ms = int((time.monotonic() - _t_start) * 1000)

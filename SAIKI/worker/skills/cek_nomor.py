@@ -23,11 +23,13 @@ class CekNomorSkill(Skill):
     """
 
     def __init__(self, at_client: object, ussd_runtime: object = None,
-                 command_registry: object = None, parser_registry: object = None) -> None:
+                 command_registry: object = None, parser_registry: object = None,
+                 phone_cache: object = None) -> None:
         self._at_client = at_client
         self._ussd_runtime = ussd_runtime
         self._cmd_reg = command_registry
         self._parser_reg = parser_registry
+        self._phone_cache = phone_cache
 
     @property
     def name(self) -> str:
@@ -139,6 +141,9 @@ class CekNomorSkill(Skill):
         if parsed_number:
             logger.info("[CEK NOMOR RESULT] PORT=%s COMMAND_ID=%s OUTCOME=success NOMOR=%s",
                          port, command_id, parsed_number)
+            # BUILD-C: Save to phone cache
+            if self._phone_cache and parsed_number and parsed_number != "-":
+                self._phone_cache.put(parsed_number, source="at_cnum")
             return self._success(port, data)
         else:
             logger.info("[CEK NOMOR RESULT] PORT=%s COMMAND_ID=%s OUTCOME=failed REASON=no_number_found",
