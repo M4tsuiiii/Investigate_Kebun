@@ -44,6 +44,8 @@ USSD_SESSION_FENCE_TIMEOUT_SECONDS = 3.0
 CPIN_UNKNOWN_THRESHOLD = 3  # count of consecutive UNKNOWN/ERROR before final confirm
 CPIN_FINAL_CONFIRM_TIMEOUT = 3.0  # seconds to wait on final confirmation query
 CPIN_MAX_REMOVAL_CONFIRM = 2  # how many NOT_READY confirmations before forcing NOT_INSERTED
+# Prompt recovery retry budget before giving up on an operator menu response.
+PROMPT_RECOVERY_MAX = 2
 
 power_injection_lock = threading.BoundedSemaphore(2)
 telegram_api_queue = threading.Lock()
@@ -211,6 +213,8 @@ class PortStateMachine:
             self.current_state = new_state
 
             if new_state == "READY":
+                if hasattr(self, "worker"):
+                    self.worker.prompt_recovery_count = 0
                 self._set_status("READY", "+CPIN: READY")
                 if (global_settings.get("trigger_mode", "Auto-Run on Insert") == "Auto-Run on Insert"
                         and old_state != "READY"
@@ -1016,6 +1020,7 @@ class PortWorker(threading.Thread):
         self.max_removal_confirmation = 2
         self.unknown_failure_count = 0
         self.pending_auto_run = False
+        self.prompt_recovery_count = 0
         self.next_dial_allowed_at = 0.0
         self.ussd_internal_state = "IDLE"
         self._ussd_session_id = 0
@@ -1028,6 +1033,7 @@ class PortWorker(threading.Thread):
             "business_outcome": None,
         }
         self.state_machine = PortStateMachine(self.port_name, self.ui_callback, self._queue_auto_run)
+        self.state_machine.worker = self
         # setup per-port rotating file logger
         try:
             logger_name = f"port.{self.port_name}"
@@ -1095,6 +1101,7 @@ class PortWorker(threading.Thread):
 
         self.current_baud = None
         self.pending_auto_run = True
+        self.prompt_recovery_count = 0
         self.ui_callback(self.port_name, "respon", "Reset modem selesai; mencoba koneksi ulang dan menjalankan automasi...")
         self.log(f"Reset finished for {self.port_name}; auto-run queued")
 
@@ -1360,12 +1367,12 @@ class PortWorker(threading.Thread):
                                 decision = "READY"
                                 reason = "FINAL_READ_READY"
                             elif self._is_removal_candidate_error(final_raw):
-                                decision = "NOT_INSERTED"
-                                reason = "ERROR_AFTER_UNKNOWN_CONSIDERED_REMOVAL"
+                                decision = "READY"
+                                reason = "ERROR_AFTER_UNKNOWN_KEEP_READY"
                             else:
-                                # fallback: consider removed if still unknown after final check
-                                decision = "NOT_INSERTED"
-                                reason = "CPIN_TIMEOUT_CONFIRM_FAILED"
+                                # no explicit removal evidence: keep previous state
+                                decision = "READY"
+                                reason = "CPIN_CONFIRM_FAILED_KEEP_READY"
 
                             # log CPIN_DECISION
                             self._log_cpin_decision = getattr(self, '_log_cpin_decision', None)
@@ -1416,21 +1423,9 @@ class PortWorker(threading.Thread):
                             self._log_cpin_lifecycle(old_state, detected_state, raw, "SIM_REMOVED", 0)
                         elif confirmed_state == "NOT_READY":
                             self.removal_confirmation_count += 1
-                            if self.removal_confirmation_count >= CPIN_MAX_REMOVAL_CONFIRM:
-                                detected_state = "NOT_INSERTED"
-                                self.pending_removal_confirmation = False
-                                self.removal_confirmation_count = 0
-                                self._log_cpin_lifecycle(old_state, detected_state, raw, "SIM_REMOVED", CPIN_MAX_REMOVAL_CONFIRM)
-                            else:
-                                detected_state = "NOT_READY"
-                                self._log_cpin_lifecycle(old_state, detected_state, raw, "CONFIRMING_REMOVAL", self.removal_confirmation_count)
-                        else:
-                            # If error on retry and it's a removal candidate, treat as removed
-                            if self._is_removal_candidate_error(raw_retry):
-                                detected_state = "NOT_INSERTED"
-                                self.pending_removal_confirmation = False
-                                self.removal_confirmation_count = 0
-                                self._log_cpin_lifecycle(old_state, detected_state, raw, "SIM_REMOVED", 0)
+                            detected_state = "NOT_READY"
+                            self._log_cpin_lifecycle(old_state, detected_state, raw, "CONFIRMING_REMOVAL", self.removal_confirmation_count)
+                        # else: no explicit removal evidence on retry; state left unchanged.
 
                     # Normalize counters and UI signals
                     if detected_state in ("READY", "NOT_INSERTED", "PIN_REQUIRED"):
@@ -1568,6 +1563,27 @@ class PortWorker(threading.Thread):
     def _is_ussd_command_executed(self, response):
         return isinstance(response, str) and response == "COMMAND_EXECUTED"
 
+    def _recover_from_prompt(self, ser, response, requeue):
+        try:
+            ser.write(b"AT+CUSD=2\r\n")
+        except Exception:
+            pass
+        self._flush_serial_input(ser)
+        if requeue:
+            self.prompt_recovery_count += 1
+            if self.prompt_recovery_count <= PROMPT_RECOVERY_MAX:
+                self.ui_callback(self.port_name, "status", "PROSES")
+                self.ui_callback(self.port_name, "respon", "operator menu: retry otomatis")
+                self._queue_auto_run()
+                return
+            self.pending_auto_run = False
+            self.prompt_recovery_count = 0
+            self.ui_callback(self.port_name, "status", "GAGAL")
+            self.ui_callback(self.port_name, "respon", "prompt berulang")
+            return
+        self.ui_callback(self.port_name, "status", "GAGAL")
+        self.ui_callback(self.port_name, "respon", "operator menu terdeteksi")
+
     def _should_retry_ussd(self, kind):
         return kind in ("TIMEOUT", "ERROR", "COMMAND_ECHO", "AT_OK", "MODEM_NOTIFICATION", "WAITING_RESPONSE")
 
@@ -1587,7 +1603,7 @@ class PortWorker(threading.Thread):
                 self.ui_callback(self.port_name, "status", "GAGAL")
                 return
             if self._is_ussd_prompt(res):
-                self.ui_callback(self.port_name, "status", "PROSES")
+                self._recover_from_prompt(ser, res, False)
                 return
             if res != "timeout" and not self._is_ussd_error(res) and not self._is_ussd_partial(res) and "error" not in res.lower():
                 num_m = re.search(r"(08\d{9,11})", res)
@@ -1609,7 +1625,7 @@ class PortWorker(threading.Thread):
                 self.ui_callback(self.port_name, "status", "GAGAL")
                 return
             if self._is_ussd_prompt(res):
-                self.ui_callback(self.port_name, "status", "PROSES")
+                self._recover_from_prompt(ser, res, False)
                 return
             nik_m = re.search(r"(\d{16})", res)
             if nik_m:
@@ -1670,7 +1686,7 @@ class PortWorker(threading.Thread):
                 self._log_ussd_flow_decision("injeksi", res, "PROVISIONAL_WAITING", "EMPTY_USSD_RESPONSE")
                 provisional_inject = True
             if self._is_ussd_prompt(res):
-                self.ui_callback(self.port_name, "status", "PROSES")
+                self._recover_from_prompt(ser, res, False)
                 return
             # If res is an actual payload string, classify intent to decide injection outcome
             if isinstance(res, str) and not res.startswith(("USSD_STATUS_ONLY:", "USSD_EMPTY_PAYLOAD", "PROMPT:", "PARTIAL:", "ERROR:", "USSD_STATUS_ONLY:")) and res not in ("timeout", "COMMAND_EXECUTED"):
@@ -1699,14 +1715,13 @@ class PortWorker(threading.Thread):
                 self.ui_callback(self.port_name, "respon", "Verifikasi status kartu setelah reaktivasi...")
                 res_verifikasi = self.send_ussd(ser, global_settings["dial_cek_nomor"])
                 if self._is_ussd_prompt(res_verifikasi):
-                    self.ui_callback(self.port_name, "status", "PROSES")
-                    self.ui_callback(self.port_name, "respon", res_verifikasi)
+                    self._recover_from_prompt(ser, res_verifikasi, False)
                     return
                 grace_date = extract_grace_date(res_verifikasi)
                 derived_card_status, days_remaining = classify_card_status(grace_date, res_verifikasi)
                 self.business_snapshot["after_grace_date"] = grace_date if grace_date and grace_date != "-" else None
                 self.business_snapshot["after_card_status_value"] = derived_card_status
-                business_outcome = decide_business_outcome(self.business_snapshot, res)
+                business_outcome = decide_business_outcome(self.business_snapshot, res_verifikasi)
                 self.ui_callback(self.port_name, "respon", res_verifikasi)
                 lifetime_text = format_lifetime(days_remaining)
                 self.ui_callback(self.port_name, "masa_aktif", grace_date)
@@ -1745,7 +1760,7 @@ class PortWorker(threading.Thread):
             self.ui_callback(self.port_name, "respon", "Nomor tidak ditemukan pada respons operator (status-only)")
             return
         if self._is_ussd_prompt(res_nomor):
-            self.ui_callback(self.port_name, "status", "PROSES")
+            self._recover_from_prompt(ser, res_nomor, True)
             return
         if res_nomor == "timeout" or self._is_ussd_error(res_nomor) or self._is_ussd_partial(res_nomor) or self._is_ussd_command_executed(res_nomor) or "error" in res_nomor.lower():
             self.ui_callback(self.port_name, "status", "GAGAL")
@@ -1821,7 +1836,7 @@ class PortWorker(threading.Thread):
                 )
                 return
             if self._is_ussd_prompt(res_nik):
-                self.ui_callback(self.port_name, "status", "PROSES")
+                self._recover_from_prompt(ser, res_nik, True)
                 return
             nik_m = re.search(r"(\d{16})", res_nik)
             if res_nik == "timeout" or self._is_ussd_error(res_nik) or self._is_ussd_partial(res_nik) or self._is_ussd_command_executed(res_nik) or "error" in res_nik.lower() or not nik_m:
@@ -1878,7 +1893,7 @@ class PortWorker(threading.Thread):
             self._log_ussd_flow_decision("injeksi", res_inj, "PROVISIONAL_WAITING", "EMPTY_USSD_RESPONSE")
             provisional_inject = True
         if self._is_ussd_prompt(res_inj):
-            self.ui_callback(self.port_name, "status", "PROSES")
+            self._recover_from_prompt(ser, res_inj, True)
             return
         # If modem returned COMMAND_EXECUTED, treat as provisional success for injection
         if self._is_ussd_command_executed(res_inj):
@@ -1932,14 +1947,13 @@ class PortWorker(threading.Thread):
             )
             return
         if self._is_ussd_prompt(res_verifikasi):
-            self.ui_callback(self.port_name, "status", "PROSES")
-            self.ui_callback(self.port_name, "respon", res_verifikasi)
+            self._recover_from_prompt(ser, res_verifikasi, True)
             return
         grace_date = extract_grace_date(res_verifikasi)
         derived_card_status, days_remaining = classify_card_status(grace_date, res_verifikasi)
         self.business_snapshot["after_grace_date"] = grace_date if grace_date and grace_date != "-" else None
         self.business_snapshot["after_card_status_value"] = derived_card_status
-        business_outcome = decide_business_outcome(self.business_snapshot, res_inj)
+        business_outcome = decide_business_outcome(self.business_snapshot, res_verifikasi)
         self.ui_callback(self.port_name, "respon", res_verifikasi)
         if business_outcome == "SUCCESS":
             self.ui_callback(self.port_name, "masa_aktif", grace_date)
